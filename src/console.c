@@ -144,7 +144,7 @@ void console_init(void)
     gpio_configure_pin(gpioa, 10, GPI_pull_up);
 
     /* BAUD, 8n1. */
-    usart1->brr = SYSCLK / BAUD;
+    usart1->brr = sysclk / BAUD;
     usart1->cr1 = (USART_CR1_UE | USART_CR1_TE | USART_CR1_RE);
     usart1->cr3 = USART_CR3_DMAT;
 

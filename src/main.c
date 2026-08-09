@@ -48,7 +48,26 @@
  *  B8:  U0
  *  B9:  U1
  *  B10: U2
+ *
+ * Recognized Keystrokes (Ctrl-Alt plus below)
+ *      W          = Move OSD up
+ *      A          = Move OSD left
+ *      S          = Move OSD down
+ *      D          = Move OSD right
+ *      1          = Switch to primary HDMI
+ *      2          = Switch to secondary HDMI
+ *      CRSR Left  = Change (-)
+ *      CRSR Right = Change (+)
+ *      CRSR Up    = Select or Eject
+ *      Help       = Setup
+ *      Return     = Hold Keyboard
+ *      Del        = OSD on/off
+ *      F1-F10     = Option
+ *      KP+-       = Polarity (NDEBUG mode)
+ *      KP()/      = 15KHz/VGA/Auto (NDEBUG mode)
  */
+
+#define AMIGA_AV_TO_HDMI  // For STM32 integrated on Amiga AV to HDMI board
 
 /* CSYNC/HSYNC (A8): EXTI IRQ trigger and TIM1 Ch.1 trigger. */
 #define gpio_csync gpioa
@@ -262,14 +281,14 @@ static void slave_arr_update(void)
         case DISP_VGA:
             vstart = config.v_off*2;
             if (startup_display_spi == DISP_SPI1) {
-                hstart = config.h_off * 7;
+                hstart = config.h_off * 7 + config.h_subpixel;
                 /* Enable output pin first (TIM4) and then start SPI transfers
                  * (TIM2). Timers run at 72 MHz, pixel clock is 36 MHz, 2 ticks
                  * per pixel: (13-1)/2 = 6 pixel */
                 tim4->arr = hstart-12;
                 tim2->arr = hstart-1;
             } else {
-                hstart = config.h_off * 7;
+                hstart = config.h_off * 7 + config.h_subpixel;
                 /* Enable output pin first (TIM4) and then start SPI transfers
                  * (TIM2). Timers run at 72 MHz, pixel clock is 18 MHz, 4 ticks
                  * per pixel: (25-1)/4 = 6 pixel */
@@ -281,7 +300,7 @@ static void slave_arr_update(void)
         case DISP_15KHZ:
         default:
             vstart = config.v_off;
-            hstart = config.h_off * 20;
+            hstart = config.h_off * 20 + config.h_subpixel;
             /* Enable output pin first (TIM4) and then start SPI transfers
              * (TIM2). Timers run at 72 MHz, pixel clock is 9 MHz, 8 ticks per
              * pixel: (49-1)/8 = 6 pixel */
@@ -623,6 +642,12 @@ static void update_amiga_keys(void)
     if (amiga_key_pressed(AMI_RIGHT)) keys |= K_RIGHT;
     if (amiga_key_pressed(AMI_UP)) keys |= K_SELECT;
     if (amiga_key_pressed(AMI_HELP)) keys |= K_MENU;
+#ifdef AMIGA_AV_TO_HDMI
+    if (amiga_key_pressed(AMI_1))
+        gpiob->bsrr = (1 << 1);         // Select main HDMI port
+    if (amiga_key_pressed(AMI_2))
+        gpiob->bsrr = (1 << (1 + 16));  // Select secondary HDMI port
+#endif
 
     /* OSD On/Off. */
     if ((del_pressed ^ amiga_key_pressed(AMI_DEL)) && (del_pressed ^= 1)) {
@@ -820,7 +845,7 @@ static bool_t do_autosync(void)
     /* 9MHz clock, 15.625kHz => 576 => PAL/NTSC
      * 9MHz clock, 20.000kHz => 450 => my threshold
      * 9MHz clock, 39.130kHz => 230 => VGA */
-    avg_hz = 9000000 / avg_sync_time; /* sync time -> frequency in Hz */
+    avg_hz = sysclk / 8 / avg_sync_time; /* sync time -> frequency in Hz */
     if ((avg_hz < 20000)
         && (running_display_timing != DISP_15KHZ)) {
         /* PAL/NTSC */
@@ -850,12 +875,39 @@ static bool_t do_polarity_autosync(void)
     return TRUE;
 }
 
+#if 0
+static void reset_to_dfu(void)
+{
+    #define SYSTEM_MEMORY_BASE 0x1ffff000  // STM32F103
+    uint32_t  addr = SYSTEM_MEMORY_BASE;
+    uint32_t *base = (uint32_t *)(uintptr_t) addr;
+
+    /* Set the vector table pointer */
+    scb->vtor = addr;
+    __asm__("dmb");
+
+    /* Set the stack pointer */
+    __asm__("MSR msp, %0" : : "r" ((uint32_t *)(base)[0]));   // SP = base[0]
+    /* Set the program counter (jump) */
+    __asm__("BX %0\n\t" : : "r" ((uint32_t *)(base)[1]));     // PC = base[1]
+}
+#endif
+
 int main(void)
 {
     static struct display no_display;
     int i;
     time_t frame_time;
     bool_t lost_sync, _keyboard_held, autosync_changed;
+
+#ifdef AMIGA_AV_TO_HDMI
+    /*
+     * Since the STM32 is drawing power from the Pi 3.3V rail,
+     * wait for power to stabilize for a bit.
+     */
+    for (i = 0; i < 10000; i++)
+        __asm("nop");  // Wait for Pi to start up
+#endif
 
     watchdog_init();
 
@@ -873,6 +925,25 @@ int main(void)
 
     /* PC13: Blue Pill Indicator LED (Active Low) */
     gpio_configure_pin(gpioc, 13, GPI_pull_up);
+
+#ifdef AMIGA_AV_TO_HDMI
+#define DFU_HELD_SHORT  100       // Min iterations for short button press
+#define DFU_HELD_LONG   50000     // Min iterations for long button press
+#define GPIO_POWER_LED  (1 << 0)  // PB0 low turns on power LED
+#define GPIO_HDMI_SSEL  (1 << 1)  // PB1 high selects secondary HDMI input
+#define GPIO_DFU_BUTTON (1 << 5)  // PB5 high is DFU button press
+
+    /* PB0: Power LED */
+    gpio_configure_pin(gpiob, 0, GPO_opendrain(_2MHz, LOW));
+    gpiob->bsrr = GPIO_POWER_LED << 16;  // Turn on power LED
+
+    /* PB5: DFU button */
+    gpio_configure_pin(gpiob, 5, GPI_pull_down);
+
+    /* PB1: HDMI switch input port control */
+    gpio_configure_pin(gpiob, 1, GPO_opendrain(_2MHz, LOW));
+    gpiob->bsrr = GPIO_HDMI_SSEL << 16;  // Select main HDMI port
+#endif
 
     /* PA0, PA1, PA2: Rotary encoder */
     for (i = 0; i < 3; i++)
@@ -1156,6 +1227,33 @@ int main(void)
             config_process(b & ~B_PROCESSED, autosync_changed);
             autosync_changed = FALSE;
         }
+
+#ifdef AMIGA_AV_TO_HDMI
+{
+        /* Check for DFU button press */
+        static uint32_t dfu_held = DFU_HELD_LONG + 1; // Held (from programming)
+        if (gpiob->idr & GPIO_DFU_BUTTON) {
+            /* DFU button pressed */
+            if (dfu_held++ == DFU_HELD_LONG) {
+                /* Long hold: do nothing for now */
+#if 0
+                /* Long hold: enter DFU mode */
+                gpiob->bsrr = GPIO_POWER_LED;  // Turn off power LED
+                reset_to_dfu();
+#endif
+            }
+        } else {
+            /* DFU button released */
+            if (dfu_held > DFU_HELD_SHORT) {
+                if (gpiob->odr & (1 << 1))
+                    gpiob->bsrr = (1 << (1 + 16)); // Select secondary HDMI port
+                else
+                    gpiob->bsrr = (1 << 1);        // Select main HDMI port
+            }
+            dfu_held = 0;
+        }
+}
+#endif
 
         i2c_process();
     }

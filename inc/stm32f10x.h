@@ -17,6 +17,7 @@
 #define PWR volatile struct pwr * const
 #define BKP volatile struct bkp * const
 #define RCC volatile struct rcc * const
+#define RTC volatile struct rtc * const
 #define IWDG volatile struct iwdg * const
 #define GPIO volatile struct gpio * const
 #define AFIO volatile struct afio * const
@@ -39,6 +40,7 @@ static FLASH flash = (struct flash *)FLASH_BASE;
 static PWR pwr = (struct pwr *)PWR_BASE;
 static BKP bkp = (struct bkp *)BKP_BASE;
 static RCC rcc = (struct rcc *)RCC_BASE;
+static RTC rtc = (struct rtc *)RTC_BASE;
 static IWDG iwdg = (struct iwdg *)IWDG_BASE;
 static GPIO gpioa = (struct gpio *)GPIOA_BASE;
 static GPIO gpiob = (struct gpio *)GPIOB_BASE;
@@ -79,12 +81,17 @@ void stm32_init(void);
 void system_reset(void);
 
 /* Clocks */
-#define SYSCLK_MHZ 72
-#define SYSCLK     (SYSCLK_MHZ * 1000000)
+#define HSI_CLOCK 8000000  // STM32F1xx HSI approximate clock speed (Hz)
+
+// #define SYSCLK_MHZ 72
+// #define SYSCLK     (SYSCLK_MHZ * 1000000)
+#define SYSCLK_MHZ (sysclk / 1000000)
 #define sysclk_ns(x) (((x) * SYSCLK_MHZ) / 1000)
 #define sysclk_us(x) ((x) * SYSCLK_MHZ)
 #define sysclk_ms(x) ((x) * SYSCLK_MHZ * 1000)
 #define sysclk_stk(x) ((x) * (SYSCLK_MHZ / STK_MHZ))
+extern unsigned int sysclk;
+extern unsigned int hse_clock;
 
 /* SysTick Timer */
 #define STK_MHZ    (SYSCLK_MHZ / 8)

@@ -110,6 +110,9 @@ void display_off(void);
 #define AMI_S            0x21
 #define AMI_D            0x22
 
+#define AMI_1            0x01
+#define AMI_2            0x02
+
 extern bool_t keyboard_held;
 bool_t amiga_key_pressed(uint8_t keycode);
 #define amiga_key_pressed_now(k) (amiga_key_pressed(k) & 1)

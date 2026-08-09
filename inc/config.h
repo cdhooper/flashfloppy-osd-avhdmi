@@ -55,7 +55,7 @@ extern struct packed config {
     uint8_t user_pin_pushpull;
     /* Mask of user-assigned pins which are HIGH at power on. */
     uint8_t user_pin_high;
-    uint8_t _pad;
+    uint8_t h_subpixel;
     struct packed config_hotkey {
         /* Mask of user pins modified by this hotkey. */
         uint8_t pin_mod;

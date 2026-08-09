@@ -195,6 +195,7 @@ struct rcc {
 #define RCC_CFGR_PLLSRC_HSI  (0u<<16)
 #define RCC_CFGR_PLLSRC_PREDIV1 (1u<<16)
 #define RCC_CFGR_ADCPRE_DIV8 (3u<<14)
+#define RCC_CFGR_PPRE1_DIV1  (0u<<8)
 #define RCC_CFGR_PPRE1_DIV2  (4u<<8)
 #define RCC_CFGR_SWS_HSI     (0u<<2)
 #define RCC_CFGR_SWS_HSE     (1u<<2)
@@ -262,7 +263,45 @@ struct rcc {
 #define RCC_AHBRSTR_ETHMACRST (1u<<14)
 #define RCC_AHBRSTR_OTGFSRST (1u<<12)
 
+#define RCC_BDCR_BDRST       (1u<<16)
+#define RCC_BDCR_RTCEN       (1u<<15)
+#define RCC_BDCR_RTCSEL_HSE  (3u<< 8)
+#define RCC_BDCR_RTCSEL_LSI  (2u<< 8)
+#define RCC_BDCR_RTCSEL_LSE  (1u<< 8)
+#define RCC_BDCR_RTCSEL_NONE (0u<< 8)
+#define RCC_BDCR_RTCSEL      (3u<< 8)
+#define RCC_BDCR_LSEBYP      (1u<< 2)
+#define RCC_BDCR_LSERDY      (1u<< 1)
+#define RCC_BDCR_LSEON       (1u<< 0)
+
 #define RCC_BASE 0x40021000
+
+/* Real Time Clock */
+struct rtc {
+    uint32_t crh;      /* 00: RTC control high */
+    uint32_t crl;      /* 04: RTC control low */
+    uint32_t prlh;     /* 08: RTC prescaler load high */
+    uint32_t prll;     /* 0C: RTC prescaler load low */
+    uint32_t divh;     /* 10: RTC divider high */
+    uint32_t divl;     /* 14: RTC divider low */
+    uint32_t cnth;     /* 18: RTC counter high */
+    uint32_t cntl;     /* 1C: RTC counter low */
+    uint32_t alrh;     /* 20: RTC alarm high */
+    uint32_t alrl;     /* 24: RTC alarm low */
+};
+
+#define RTC_CRH_OWIE         (1u<< 2)
+#define RTC_CRH_ALRIE        (1u<< 1)
+#define RTC_CRH_SECIE        (1u<< 0)
+
+#define RTC_CRL_RTOFF        (1u<< 5)
+#define RTC_CRL_CNF          (1u<< 4)
+#define RTC_CRL_RSF          (1u<< 3)
+#define RTC_CRL_OWF          (1u<< 2)
+#define RTC_CRL_ALRF         (1u<< 1)
+#define RTC_CRL_SECF         (1u<< 0)
+
+#define RTC_BASE 0x40002800
 
 /* Independent Watchdog */
 struct iwdg {

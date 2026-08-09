@@ -6,7 +6,7 @@ VER := v$(FW_VER)
 
 SUBDIRS += src
 
-.PHONY: all clean dist flash start serial
+.PHONY: all clean dist flash flash2 dfu start serial
 
 ifneq ($(RULES_MK),y)
 
@@ -35,11 +35,32 @@ dist: all
 endif
 
 BAUD=921600
-DEV=/dev/ttyUSB0
+DEV?=/dev/ttyUSB0
+CUBE_CLI  ?= /usr/local/STMCubeProgrammer/bin/STM32_Programmer_CLI
+ST_UTIL   ?= st-util
+ST_FLASH  ?= st-flash
 
-flash: all
+flash2: all
 	sudo stm32flash -b $(BAUD) \
 	-vw src/$(PROJ).hex $(DEV)
+
+flash: all
+	$(ST_FLASH) --reset write src/FF_OSD.bin 0x08000000
+
+erase:
+	$(ST_FLASH) --connect-under-reset erase
+
+stlink:
+	$(ST_UTIL) $(ST_ARGS) --no-reset
+
+gdb:
+	gdb -q -x .gdbinit src/$(PROJ).elf
+
+dfu: all
+	@echo using DEV=$(DEV) to program via serial DFU
+	sudo $(CUBE_CLI) -c port=$(DEV) br=115200 -v -w src/$(PROJ).bin 0x08000000
+	sudo $(CUBE_CLI) -c port=$(DEV) br=115200 -g 0x08000000
+#	sudo $(CUBE_CLI) -c port=$(DEV) br=115200 -v -w src/$(PROJ).bin 0x08000000 -g 0x08000000
 
 start:
 	sudo stm32flash -b $(BAUD) -g 0 $(DEV)

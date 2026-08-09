@@ -77,21 +77,138 @@ static void exception_init(void)
     scb->shpr3 = 0xff<<16;
 }
 
+unsigned int sysclk = 8000000;
+unsigned int hse_clock = 0;
+
+static void watchdog_kick(void)
+{
+    /* Reload the Watchdog. */
+    iwdg->kr = 0xaaaa;
+}
+
+static unsigned int measure_hse_clock(void)
+{
+    unsigned int timeout;
+    unsigned int hse_clock;
+    uint16_t capture_start;
+    uint16_t capture_end;
+    uint16_t capture_time;
+
+    /* Start up the internal oscillator (HSI) and switch to it. */
+    rcc->cr |= RCC_CR_HSION;
+    while (!(rcc->cr & RCC_CR_HSIRDY))
+        ;
+    rcc->cfgr &= ~RCC_CFGR_SW_MASK;
+    rcc->cfgr |= RCC_CFGR_SW_HSI;
+
+    /* Set up TIM2 clocked by HSI for time measurement */
+    rcc->apb1enr |= RCC_APB1ENR_TIM2EN;
+    tim2->psc = 0;           // No prescaler, 8 MHz resolution
+    tim2->arr = 0x0000FFFF;  // Auto-reload value
+    tim2->cr1 |= TIM_CR1_CEN;
+
+    /* Start up the external oscillator (HSE). */
+    timeout = 100000;
+    rcc->cr |= RCC_CR_HSEON;
+    while (!(rcc->cr & RCC_CR_HSERDY)) {
+        if (timeout-- == 0)
+            return (0);  // No external clock
+        cpu_relax();
+    }
+
+    /* Enable RTC to use HSE/128 */
+    rcc->apb1enr |= (RCC_APB1ENR_PWREN | RCC_APB1ENR_BKPEN);
+    pwr->cr |= PWR_CR_DBP; // Enable write access to Backup domain
+
+    rcc->bdcr &= ~RCC_BDCR_RTCSEL;
+    rcc->bdcr |= RCC_BDCR_RTCSEL_HSE; // HSE/128 is the default for this mux
+    rcc->bdcr |= RCC_BDCR_RTCEN;
+
+    /* Wait for RTC register synchronization */
+    rtc->crl &= ~RTC_CRL_RSF;
+    while (!(rtc->crl & RTC_CRL_RSF))
+        ;
+    while (!(rtc->crl & RTC_CRL_RTOFF))
+        ;
+
+    /*
+     * Configure RTC "seconds" tick by setting the prescaler
+     * for a very fast rate (128 * 100 ticks), which at 8 MHz HSE
+     * would be about 1.6 msec.
+     */
+    rtc->crl |= RTC_CRL_CNF;
+    rtc->prll = 99 & 0xFFFF;
+    rtc->prlh = (99 >> 16) & 0x000F;
+    rtc->crl &= ~RTC_CRL_CNF;
+    rtc->crl &= ~RTC_CRL_SECF; // Clear "second" flag
+    while (!(rtc->crl & RTC_CRL_RTOFF))
+        ;
+
+    /* Wait for RTC "seconds" tick to occur */
+    while (!(rtc->crl & RTC_CRL_SECF))
+        watchdog_kick();
+    rtc->crl &= ~RTC_CRL_SECF; // Clear "second" flag
+
+    capture_start = tim2->cnt;
+
+    /* Wait for RTC "seconds" tick to occur again */
+    while (!(rtc->crl & RTC_CRL_SECF))
+        watchdog_kick();
+    capture_end = tim2->cnt;
+    capture_time = capture_end - capture_start;
+
+    /* Shut down RTC */
+    rcc->bdcr &= ~RCC_BDCR_RTCEN;
+    rcc->apb1enr &= ~(RCC_APB1ENR_PWREN | RCC_APB1ENR_BKPEN);
+    pwr->cr &= ~PWR_CR_DBP;
+
+    /*
+     * capture_time is the number of HSI ticks which occurred in the
+     * (HSE / 128 / 100) interval.
+     * HSE = HSI * 128 * 100 / capture_time
+     */
+    printk("diff=%x %x %x\n", capture_time, capture_start, capture_end);
+    hse_clock = HSI_CLOCK * 128 / capture_time * 100;
+    printk("HSE=%u Hz\n", hse_clock);
+    return (hse_clock);
+}
+
 static void clock_init(void)
 {
     /* Flash controller: reads require 2 wait states at 72MHz. */
     flash->acr = FLASH_ACR_PRFTBE | FLASH_ACR_LATENCY(2);
 
-    /* Start up the external oscillator. */
-    rcc->cr |= RCC_CR_HSEON;
-    while (!(rcc->cr & RCC_CR_HSERDY))
-        cpu_relax();
+    hse_clock = measure_hse_clock();
 
     /* PLLs, scalers, muxes. */
-    rcc->cfgr = (RCC_CFGR_PLLMUL(9) |        /* PLL = 9*8MHz = 72MHz */
-                 RCC_CFGR_PLLSRC_PREDIV1 |
-                 RCC_CFGR_ADCPRE_DIV8 |
-                 RCC_CFGR_PPRE1_DIV2);
+    if (hse_clock > 7800000) {
+        /* HSE is standard 8 MHz */
+        rcc->cfgr = (RCC_CFGR_PLLMUL(9) |        /* PLL = 9*8MHz = 72MHz */
+                     RCC_CFGR_PLLSRC_PREDIV1 |
+                     RCC_CFGR_ADCPRE_DIV8 |
+                     RCC_CFGR_PPRE1_DIV2);
+        sysclk = hse_clock * 9;
+    } else if (hse_clock > 5000000) {
+        /* Clocked by Amiga 7.15909 MHz or 7.09379 MHz CDAC */
+        rcc->cfgr = (RCC_CFGR_PLLMUL(8) |    /* PLL = 8*7.159MHz = 57.272MHz */
+                     RCC_CFGR_PLLSRC_PREDIV1 |
+                     RCC_CFGR_ADCPRE_DIV8 |
+                     RCC_CFGR_PPRE1_DIV2);
+        sysclk = hse_clock * 8;
+    } else  if (hse_clock > 3000000) {
+        /* Clocked by Amiga 3.5795 MHz clock */
+        rcc->cfgr = (RCC_CFGR_PLLMUL(16) |  /* PLL = 16*3.5795MHz = 57.272MHz */
+                     RCC_CFGR_PLLSRC_PREDIV1 |
+                     RCC_CFGR_ADCPRE_DIV8 |
+                     RCC_CFGR_PPRE1_DIV2);
+        sysclk = hse_clock * 16;
+    } else {
+        /* Clocked internally (8 MHz / 2) */
+        rcc->cfgr = (RCC_CFGR_PLLMUL(16) |  /* PLL = 16 * 4MHz = 64MHz */
+                     RCC_CFGR_ADCPRE_DIV8 |
+                     RCC_CFGR_PPRE1_DIV1);
+        sysclk = HSI_CLOCK / 2 * 16;
+    }
 
     /* Enable and stabilise the PLL. */
     rcc->cr |= RCC_CR_PLLON;
@@ -150,8 +267,17 @@ static void peripheral_init(void)
 void stm32_init(void)
 {
     exception_init();
-    clock_init();
     peripheral_init();
+    console_init();
+    cpu_sync();
+#define AMIGA_AV_TO_HDMI  // For STM32 integrated on Amiga AV to HDMI board
+#ifdef AMIGA_AV_TO_HDMI
+    /* Wait a little longer to start */
+    for (volatile int i = 0; i < 100000; i++)
+        ;
+    printk("\n// START //\n\n\n");
+#endif
+    clock_init();
     cpu_sync();
 }
 

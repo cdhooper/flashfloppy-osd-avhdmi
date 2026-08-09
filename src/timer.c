@@ -31,7 +31,7 @@ static void reprogram_timer(int32_t delta)
     tim->cr1 = TIM_CR1;
     if (delta < 0x10000) {
         /* Fine-grained deadline (sub-microsecond accurate) */
-        tim->psc = SYSCLK_MHZ/TIME_MHZ-1;
+        tim->psc = sysclk/TIME_MHZ/1000000-1;
         tim->arr = (delta <= SLACK_TICKS) ? 1 : delta-SLACK_TICKS;
     } else {
         /* Coarse-grained deadline, fires in time to set a shorter,

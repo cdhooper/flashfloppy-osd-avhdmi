@@ -38,7 +38,7 @@ static void config_printk(const struct config *conf)
     printk(" Display Output: %s\n",
            config.display_spi ? "PA7/SPI1" : "PB15/SPI2");
     printk(" Display Enable: %s\n", dispen_pretty[config.dispctl_mode] );
-    printk(" H.Off: %u\n", conf->h_off);
+    printk(" H.Off: %u, Sub: %u\n", conf->h_off, conf->h_subpixel);
     printk(" V.Off: %u\n", conf->v_off);
     printk(" Rows: %u\n", conf->rows);
     printk(" Columns: %u-%u\n", conf->min_cols, conf->max_cols);
@@ -69,10 +69,19 @@ void config_init(void)
     printk("** Keir Fraser <keir.xen@gmail.com>\n");
     printk("** https://github.com/keirf/FF_OSD\n");
 
+    printk("\nHSEclk=%u Hz\nSysclk=%u Hz\n", hse_clock, sysclk);
+
     config = *flash_config;
     crc = crc16_ccitt(&config, sizeof(config), 0xffff);
     if (crc) {
+        uint8_t *ptr = (uint8_t *) &config;
         printk("\nConfig corrupt: Resetting to Factory Defaults\n");
+        for (int i = 0; i < sizeof (config); i++) {
+            printk(" %02x", *(ptr++));
+            if ((i & 7) == 7)
+                printk("\n");
+        }
+        printk("\n");
         config = dfl_config;
     } else if (gpio_pins_connected(gpioa, 1, gpioa, 2)) {
         printk("\nA1-A2 Jumpered: Resetting to Factory Defaults\n");
@@ -109,6 +118,7 @@ static enum {
     C_dispen,
     C_h_off,
     C_v_off,
+    C_h_sub,
     /* LCD */
     C_rows,
     C_min_cols,
@@ -335,6 +345,16 @@ void config_process(uint8_t b, bool_t autosync_changed)
             config.v_off = min_t(uint16_t, config.v_off+1, 299);
         if (b)
             cnf_prt(1, "%u", config.v_off);
+        break;
+    case C_h_sub:
+        if (changed)
+            cnf_prt(0, "H.Sub (0-30):");
+        if ((b & B_LEFT) && (config.h_subpixel > 0))
+            config.h_subpixel = config.h_subpixel-1;
+        if (b & B_RIGHT)
+            config.h_subpixel = min_t(uint8_t, config.h_subpixel+1, 30);
+        if (b)
+            cnf_prt(1, "%u", config.h_subpixel);
         break;
     case C_rows:
         if (changed)
