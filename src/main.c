@@ -63,8 +63,8 @@
  *      Return     = Hold Keyboard
  *      Del        = OSD on/off
  *      F1-F10     = Option
- *      KP+-       = Polarity (NDEBUG mode)
- *      KP()/      = 15KHz/VGA/Auto (NDEBUG mode)
+ *      KP+-       = Polarity  +/-
+ *      KP()/      = Video     15KHz/VGA/Auto
  */
 
 #define AMIGA_AV_TO_HDMI  // For STM32 integrated on Amiga AV to HDMI board
